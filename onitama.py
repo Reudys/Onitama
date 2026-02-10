@@ -4,10 +4,18 @@ from typing import List, Tuple, Optional
 
 # Representamos el tablero 5×5
 EMPTY = '.'
-BLUE = 'B'
-RED = 'R'
 
-# Cartas básicas de Onitama (movimientos relativos)
+# Piezas (alumnos y maestros)
+B = 'B'    # alumno azul
+BM = 'BM'  # maestro azul
+R = 'R'    # alumno rojo
+RM = 'RM'  # maestro rojo
+
+# Identificadores de jugador (turnos)
+BLUE = 'BLUE'
+RED = 'RED'
+
+# Cartas básicas de Onitama (movimientos relativos desde perspectiva Azul)
 CARDS = {
     "Tigre": [(-2, 0), (1, 0)],
     "Dragón": [(-1, -1), (-1, 1), (1, -2), (1, 2)],
@@ -25,21 +33,24 @@ class Move:
     from_pos: Tuple[int, int]
     to_pos: Tuple[int, int]
 
+def is_blue_piece(p: str) -> bool:
+    return p in (B, BM)
+
+def is_red_piece(p: str) -> bool:
+    return p in (R, RM)
+
 class Onitama:
     def __init__(self):
-        # Tablero inicial
+        # Tablero inicial: 4 alumnos + maestro en el centro
         self.board = [
-            [BLUE, BLUE, BLUE, BLUE, BLUE],
+            [B, B, BM, B, B],
             [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
             [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
             [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [RED,   RED,   RED,   RED,   RED  ]
+            [R, R, RM, R, R]
         ]
-        # Maestros en el centro
-        self.board[0][2] = BLUE
-        self.board[4][2] = RED
 
-        # Cartas iniciales (puedes cambiarlas si quieres otro set)
+        # Cartas iniciales (puedes cambiarlas si quieres)
         self.cards = {
             "player_blue": ["Tigre", "Crane"],
             "player_red":  ["Frog", "Liebre"],
@@ -49,9 +60,10 @@ class Onitama:
         self.current_player = BLUE  # Azul empieza
 
     def print_board(self):
-        print("\n  0 1 2 3 4")
+        # Alineado para que BM/RM no descuadren
+        print("\n  0   1   2   3   4")
         for i, row in enumerate(self.board):
-            print(f"{i} {' '.join(row)}")
+            print(f"{i} " + "  ".join(f"{cell:2}" for cell in row))
         print()
 
     def print_cards(self):
@@ -61,70 +73,86 @@ class Onitama:
         print()
 
     def get_possible_moves(self, player: str) -> List[Move]:
-        moves = []
+        moves: List[Move] = []
         player_key = "player_blue" if player == BLUE else "player_red"
         card_names = self.cards[player_key]
 
         for r in range(5):
             for c in range(5):
-                if self.board[r][c] != player:
+                piece = self.board[r][c]
+                if piece == EMPTY:
                     continue
+
+                # Filtrar piezas del jugador actual
+                if player == BLUE and not is_blue_piece(piece):
+                    continue
+                if player == RED and not is_red_piece(piece):
+                    continue
+
                 for card_name in card_names:
                     deltas = CARDS[card_name]
                     for dr, dc in deltas:
-                        # Invertimos dirección para el jugador Rojo
+                        # Invertimos dirección para el jugador Rojo (rotación 180°)
                         if player == RED:
                             dr, dc = -dr, -dc
+
                         nr, nc = r + dr, c + dc
                         if 0 <= nr < 5 and 0 <= nc < 5:
                             target = self.board[nr][nc]
-                            if target == EMPTY or target != player:
-                                moves.append(Move(card_name, (r, c), (nr, nc)))
+
+                            # No puedes capturar tu propia pieza
+                            if player == BLUE and is_blue_piece(target):
+                                continue
+                            if player == RED and is_red_piece(target):
+                                continue
+
+                            moves.append(Move(card_name, (r, c), (nr, nc)))
         return moves
 
     def make_move(self, move: Move):
         r1, c1 = move.from_pos
         r2, c2 = move.to_pos
 
-        # Mover la pieza
+        # Mover la pieza (captura si hay rival en destino)
         piece = self.board[r1][c1]
         self.board[r1][c1] = EMPTY
         self.board[r2][c2] = piece
 
-        # Rotar cartas
+        # Rotación correcta de cartas:
+        # - La carta usada va al centro
+        # - La carta del centro pasa a la mano del mismo jugador que jugó
         player_key = "player_blue" if self.current_player == BLUE else "player_red"
-        other_key = "player_red" if self.current_player == BLUE else "player_blue"
+        hand = self.cards[player_key]
 
-        cards = self.cards[player_key]
-        cards.remove(move.card_name)
+        hand.remove(move.card_name)
         old_center = self.cards["center"]
         self.cards["center"] = move.card_name
-        self.cards[other_key].append(old_center)
+        hand.append(old_center)
 
         # Cambiar turno
         self.current_player = RED if self.current_player == BLUE else BLUE
 
     def is_game_over(self) -> Optional[str]:
         # Victoria 1: capturar el maestro enemigo
-        has_blue_master = any(BLUE in row for row in self.board)
-        has_red_master = any(RED in row for row in self.board)
+        blue_master_alive = any(BM in row for row in self.board)
+        red_master_alive  = any(RM in row for row in self.board)
 
-        if not has_blue_master:
+        if not blue_master_alive:
             return RED
-        if not has_red_master:
+        if not red_master_alive:
             return BLUE
 
-        # Victoria 2: maestro en el templo enemigo (centro de la fila opuesta)
-        if self.board[4][2] == BLUE:
+        # Victoria 2: maestro en el templo enemigo
+        if self.board[4][2] == BM:
             return BLUE
-        if self.board[0][2] == RED:
+        if self.board[0][2] == RM:
             return RED
 
         return None
 
     def play_two_players(self):
-        print("=== ONITAMA - DOS JUGADORES ===")
-        print("Azul (B) empieza. Ambos jugadores eligen sus movimientos.\n")
+        print("=== ONITAMA - DOS JUGADORES (CONSOLA) ===")
+        print("Azul (BLUE) empieza. Ambos jugadores eligen sus movimientos.\n")
         print("Escribe el número del movimiento que quieres hacer.")
         print("Escribe 0 para terminar la partida en cualquier momento.\n")
 
@@ -132,7 +160,7 @@ class Onitama:
         while True:
             winner = self.is_game_over()
             if winner:
-                print(f"\n¡GANÓ {winner.upper()}!")
+                print(f"\n¡GANÓ {winner}!")
                 self.print_board()
                 break
 
@@ -170,8 +198,6 @@ class Onitama:
                     print("Por favor ingresa un número válido.")
 
             turn += 1
-
-            # Pequeña separación visual entre turnos
             print("-" * 40)
 
 # -----------------------
