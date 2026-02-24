@@ -1,206 +1,434 @@
+import random
 import copy
-from dataclasses import dataclass
-from typing import List, Tuple, Optional
+import time
+import numpy as np
 
-# Representamos el tablero 5×5
-EMPTY = '.'
+SIZE = 5
 
-# Piezas (alumnos y maestros)
-B = 'B'    # alumno azul
-BM = 'BM'  # maestro azul
-R = 'R'    # alumno rojo
-RM = 'RM'  # maestro rojo
+# ========================
+# Cartas (igual que tuyo)
+# ========================
+class Card():
+  def __init__(self, name, moves):
+    self.name = name
+    self.moves = moves  # tuple of (dr, dc)
 
-# Identificadores de jugador (turnos)
-BLUE = 'BLUE'
-RED = 'RED'
+  def __str__(self):
+    return self.name
 
-# Cartas básicas de Onitama (movimientos relativos desde perspectiva Azul)
-CARDS = {
-    "Tigre": [(-2, 0), (1, 0)],
-    "Dragón": [(-1, -1), (-1, 1), (1, -2), (1, 2)],
-    "Frog": [(-1, -1), (0, -2), (1, 1)],
-    "Liebre": [(-1, 1), (0, 2), (1, -1)],
-    "Crane": [(-1, 0), (1, -1), (1, 1)],
-    "Mono": [(-1, -1), (-1, 1), (1, -1), (1, 1)],
-    "Mantis": [(-1, -1), (-1, 1), (1, 0)],
-    "Cabra": [(0, -1), (0, 1), (-2, 0), (2, 0)],
-}
+  def __repr__(self):
+    return str(self)
 
-@dataclass
-class Move:
-    card_name: str
-    from_pos: Tuple[int, int]
-    to_pos: Tuple[int, int]
+CARDS = [
+    Card("Tiger",  ((-2, 0), (1, 0))),
+    Card("Dragon", ((-1, -2), (-1, 2), (1, -1), (1, 1))),
+    Card("Frog",   ((0, -2), (-1, -1), (1, 1))),
+    Card("Rabbit", ((0, 2), (-1, 1), (1, -1))),
+    Card("Crab",   ((0, -2), (-1, 0), (0, 2))),
+    Card("Elephant", ((-1, -1), (-1, 1), (0, -1), (0, 1))),
+    Card("Goose",  ((-1, -1), (-1, 0), (0, 0), (0, 1))),
+    Card("Rooster",((-1, 0), (-1, 1), (0, -1), (0, 1))),
+    Card("Monkey", ((-1, -1), (-1, 1), (1, -1), (1, 1))),
+    Card("Mantis", ((-1, -1), (-1, 1), (1, 0))),
+    Card("Horse",  ((-1, 0), (0, -1), (1, 0))),
+    Card("Ox",     ((-1, 0), (0, 1), (1, 0))),
+    Card("Crane",  ((-1, 0), (1, -1), (1, 1))),
+    Card("Boar",   ((-1, 0), (0, -1), (0, 1))),
+    Card("Eel",    ((-1, -1), (1, -1), (0, 1))),
+    Card("Cobra",  ((-1, 1), (1, 1), (0, -1))),
+]
 
-def is_blue_piece(p: str) -> bool:
-    return p in (B, BM)
+def normalized_cards():
+  fixed = []
+  for c in CARDS:
+    if c.name == "Goose":
+      fixed.append(Card("Goose", ((-1, -1), (0, -1), (0, 1), (1, 1))))
+    elif c.name == "Rooster":
+      fixed.append(Card("Rooster", ((-1, 1), (0, -1), (0, 1), (1, -1))))
+    else:
+      fixed.append(c)
+  return fixed
 
-def is_red_piece(p: str) -> bool:
-    return p in (R, RM)
+CARDS_N = normalized_cards()
 
-class Onitama:
-    def __init__(self):
-        # Tablero inicial: 4 alumnos + maestro en el centro
-        self.board = [
-            [B, B, BM, B, B],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [EMPTY, EMPTY, EMPTY, EMPTY, EMPTY],
-            [R, R, RM, R, R]
-        ]
+def inside(r, c):
+  return 0 <= r < SIZE and 0 <= c < SIZE
 
-        # Cartas iniciales (puedes cambiarlas si quieres)
-        self.cards = {
-            "player_blue": ["Tigre", "Crane"],
-            "player_red":  ["Frog", "Liebre"],
-            "center": "Mantis"
-        }
+def rc_to_coord(r, c):
+  file_ch = chr(ord('a') + c)
+  rank = SIZE - r
+  return f"{file_ch}{rank}"
 
-        self.current_player = BLUE  # Azul empieza
+def opponent(player):
+  return "R" if player == "B" else "B"
 
-    def print_board(self):
-        # Alineado para que BM/RM no descuadren
-        print("\n  0   1   2   3   4")
-        for i, row in enumerate(self.board):
-            print(f"{i} " + "  ".join(f"{cell:2}" for cell in row))
-        print()
 
-    def print_cards(self):
-        print(f"Cartas de Azul: {self.cards['player_blue']}")
-        print(f"Carta central:  {self.cards['center']}")
-        print(f"Cartas de Rojo: {self.cards['player_red']}")
-        print()
+class Player():
+  def __init__(self, name, type_="human"):
+    self.name = name     
+    self.type_ = type_    
 
-    def get_possible_moves(self, player: str) -> List[Move]:
-        moves: List[Move] = []
-        player_key = "player_blue" if player == BLUE else "player_red"
-        card_names = self.cards[player_key]
 
-        for r in range(5):
-            for c in range(5):
-                piece = self.board[r][c]
-                if piece == EMPTY:
-                    continue
+class OnitamaGameSession():
 
-                # Filtrar piezas del jugador actual
-                if player == BLUE and not is_blue_piece(piece):
-                    continue
-                if player == RED and not is_red_piece(piece):
-                    continue
+  def __init__(self, player_types=None, hide_print=False, minimax_time=1):
+    self.hide_print = hide_print
+    self.minimax_time = minimax_time
 
-                for card_name in card_names:
-                    deltas = CARDS[card_name]
-                    for dr, dc in deltas:
-                        # Invertimos dirección para el jugador Rojo (rotación 180°)
-                        if player == RED:
-                            dr, dc = -dr, -dc
+    self.n_players = 2
+    self.player_types = player_types if player_types is not None else ["human", "AI"]
+    self.players = [Player("B", self.player_types[0]), Player("R", self.player_types[1])]
 
-                        nr, nc = r + dr, c + dc
-                        if 0 <= nr < 5 and 0 <= nc < 5:
-                            target = self.board[nr][nc]
+    self.board = [["." for _ in range(SIZE)] for _ in range(SIZE)]
+    self.hands = {"B": [], "R": []}
+    self.side_card = None
+    self.temple = {"R": (0, 2), "B": (4, 2)}
 
-                            # No puedes capturar tu propia pieza
-                            if player == BLUE and is_blue_piece(target):
-                                continue
-                            if player == RED and is_red_piece(target):
-                                continue
+    self.curr_turn = 0
+    self.curr_player = self.players[self.curr_turn]
+    self.winners = []
 
-                            moves.append(Move(card_name, (r, c), (nr, nc)))
-        return moves
+    self.last_move_msg = ""
 
-    def make_move(self, move: Move):
-        r1, c1 = move.from_pos
-        r2, c2 = move.to_pos
+    self._setup_board()
+    self._setup_cards()
 
-        # Mover la pieza (captura si hay rival en destino)
-        piece = self.board[r1][c1]
-        self.board[r1][c1] = EMPTY
-        self.board[r2][c2] = piece
+  def _setup_board(self):
+    self.board[0] = ["R", "R", "RM", "R", "R"]
+    self.board[4] = ["B", "B", "BM", "B", "B"]
 
-        # Rotación correcta de cartas:
-        # - La carta usada va al centro
-        # - La carta del centro pasa a la mano del mismo jugador que jugó
-        player_key = "player_blue" if self.current_player == BLUE else "player_red"
-        hand = self.cards[player_key]
+  def _setup_cards(self):
+    five = random.sample(CARDS_N, 5)
+    self.hands["B"] = [five[0], five[1]]
+    self.hands["R"] = [five[2], five[3]]
+    self.side_card = five[4]
+    self.curr_turn = random.choice([0, 1])
+    self.curr_player = self.players[self.curr_turn]
 
-        hand.remove(move.card_name)
-        old_center = self.cards["center"]
-        self.cards["center"] = move.card_name
-        hand.append(old_center)
+  def print_state(self):
+    if self.hide_print:
+      return
 
-        # Cambiar turno
-        self.current_player = RED if self.current_player == BLUE else BLUE
+    turn = self.curr_player.name
+    print("\n" + "=" * 45)
+    print(f"Turno: {'Azul (B)' if turn=='B' else 'Rojo (R)'}")
+    print("Cartas:")
+    print(f"  B: 1) {self.hands['B'][0].name}   2) {self.hands['B'][1].name}")
+    print(f"  R: 1) {self.hands['R'][0].name}   2) {self.hands['R'][1].name}")
+    print(f"  Mesa (side): {self.side_card.name}")
+    print("\nTablero:")
+    print("    a  b  c  d  e")
+    for r in range(SIZE):
+      rank = SIZE - r
+      row_str = " ".join(self.board[r][c].rjust(2) for c in range(SIZE))
+      print(f" {rank}  {row_str}")
+    print("=" * 45)
 
-    def is_game_over(self) -> Optional[str]:
-        # Victoria 1: capturar el maestro enemigo
-        blue_master_alive = any(BM in row for row in self.board)
-        red_master_alive  = any(RM in row for row in self.board)
+  def piece_at(self, r, c):
+    return self.board[r][c]
 
-        if not blue_master_alive:
-            return RED
-        if not red_master_alive:
-            return BLUE
+  def set_piece(self, r, c, val):
+    self.board[r][c] = val
 
-        # Victoria 2: maestro en el templo enemigo
-        if self.board[4][2] == BM:
-            return BLUE
-        if self.board[0][2] == RM:
-            return RED
+  def option_to_text(self, option):
+    frm, to, _ci = option
+    piece = self.piece_at(*frm)
+    dest = self.piece_at(*to)
+    capture = f" captura {dest}" if dest != "." else ""
+    return f"{rc_to_coord(*frm)} ({piece}) -> {rc_to_coord(*to)}{capture}"
 
-        return None
+  def card_moves_for_player(self, card, player):
+    if player == "B":
+      return list(card.moves)
+    return [(-dr, dc) for (dr, dc) in card.moves]
 
-    def play_two_players(self):
-        print("=== ONITAMA - DOS JUGADORES (CONSOLA) ===")
-        print("Azul (BLUE) empieza. Ambos jugadores eligen sus movimientos.\n")
-        print("Escribe el número del movimiento que quieres hacer.")
-        print("Escribe 0 para terminar la partida en cualquier momento.\n")
+  def all_legal_moves(self, player):
+    legal = []
+    for idx, card in enumerate(self.hands[player]):
+      moves = self.card_moves_for_player(card, player)
+      for r in range(SIZE):
+        for c in range(SIZE):
+          p = self.piece_at(r, c)
+          if p == ".": 
+            continue
+          if player == "B" and not p.startswith("B"):
+            continue
+          if player == "R" and not p.startswith("R"):
+            continue
 
-        turn = 1
-        while True:
-            winner = self.is_game_over()
-            if winner:
-                print(f"\n¡GANÓ {winner}!")
-                self.print_board()
-                break
+          for dr, dc in moves:
+            nr, nc = r + dr, c + dc
+            if not inside(nr, nc):
+              continue
+            dest = self.piece_at(nr, nc)
+            if dest != ".":
+              if player == "B" and dest.startswith("B"):
+                continue
+              if player == "R" and dest.startswith("R"):
+                continue
+            legal.append(((r, c), (nr, nc), idx))
+    return legal
 
-            self.print_board()
-            self.print_cards()
+  def check_winner(self):
+    found_BM = False
+    found_RM = False
 
-            player_name = "Azul" if self.current_player == BLUE else "Rojo"
-            print(f"Turno {turn} - {player_name}")
+    for r in range(SIZE):
+      for c in range(SIZE):
+        if self.board[r][c] == "BM":
+          found_BM = True
+        elif self.board[r][c] == "RM":
+          found_RM = True
 
-            moves = self.get_possible_moves(self.current_player)
-            if not moves:
-                print(f"{player_name} no tiene movimientos posibles. ¡Juego terminado!")
-                break
+    if not found_BM:
+      return "R"
+    if not found_RM:
+      return "B"
 
-            print(f"Movimientos disponibles ({len(moves)}):")
-            for i, m in enumerate(moves, 1):
-                piece = self.board[m.from_pos[0]][m.from_pos[1]]
-                print(f"{i:2d}. {m.card_name:8}  {m.from_pos} → {m.to_pos}   ({piece})")
+    if self.board[self.temple["R"][0]][self.temple["R"][1]] == "BM":
+      return "B"
+    if self.board[self.temple["B"][0]][self.temple["B"][1]] == "RM":
+      return "R"
 
-            while True:
-                try:
-                    choice = input("\nElige movimiento (número) o 0 para salir: ").strip()
-                    if choice == "0":
-                        print("\nPartida terminada por los jugadores.")
-                        return
-                    choice = int(choice)
-                    if 1 <= choice <= len(moves):
-                        selected = moves[choice - 1]
-                        print(f"→ Movimiento: {selected.card_name} {selected.from_pos} → {selected.to_pos}")
-                        self.make_move(selected)
-                        break
-                    else:
-                        print("Número fuera de rango, intenta otra vez.")
-                except ValueError:
-                    print("Por favor ingresa un número válido.")
+    return None
 
-            turn += 1
-            print("-" * 40)
+  def rotate_cards(self, player, used_hand_index):
+    used = self.hands[player][used_hand_index]
+    self.hands[player][used_hand_index] = self.side_card
+    self.side_card = used
+    return used
 
-# -----------------------
+  def get_available_decisions(self):
+    return self.all_legal_moves(self.curr_player.name)
+
+  def play_turn(self, decision):
+    player = self.curr_player.name
+    frm, to, ci = decision
+    r, c = frm
+    nr, nc = to
+
+    piece = self.piece_at(r, c)
+    if piece == ".":
+      return False
+    if player == "B" and not piece.startswith("B"):
+      return False
+    if player == "R" and not piece.startswith("R"):
+      return False
+
+    card = self.hands[player][ci]
+    allowed = self.card_moves_for_player(card, player)
+    dr, dc = nr - r, nc - c
+    if (dr, dc) not in allowed:
+      return False
+    if not inside(nr, nc):
+      return False
+
+    dest = self.piece_at(nr, nc)
+    if dest != ".":
+      if player == "B" and dest.startswith("B"):
+        return False
+      if player == "R" and dest.startswith("R"):
+        return False
+
+    self.set_piece(nr, nc, piece)
+    self.set_piece(r, c, ".")
+    used_card = self.rotate_cards(player, ci)
+
+    received_card = self.hands[player][ci]  # carta que entró a la mano (en el índice usado)
+    capture_msg = f" (capturaste {dest})" if dest != "." else ""
+    self.last_move_msg = (
+      f"Moviste {piece} de {rc_to_coord(r,c)} -> {rc_to_coord(nr,nc)}{capture_msg}. "
+      f"Usaste {used_card.name}; ahora {used_card.name} está en la mesa y recibiste {received_card.name}."
+    )
+
+    w = self.check_winner()
+    if w is not None and len(self.winners) == 0:
+      self.winners = [Player(w), Player(opponent(w))]
+
+    if len(self.winners) == 0:
+      self.curr_turn = 0 if self.curr_turn == 1 else 1
+      self.curr_player = self.players[self.curr_turn]
+
+    return True
+
+  def is_terminal(self):
+    return len(self.winners) == self.n_players
+
+  def get_winners_points(self):
+    if not self.is_terminal():
+      return {self.players[0].name: 0, self.players[1].name: 0}
+
+    winner_name = self.winners[0].name
+    loser_name = self.winners[1].name
+    return {winner_name: 1000, loser_name: 0}
+
+  def children(self):
+    options = self.get_available_decisions()
+    children = []
+    for option in options:
+      child = copy.deepcopy(self)
+      child.play_turn(option)
+      children.append((option, child))
+    return children
+
+  def heuristic(self, player_name):
+    opp = opponent(player_name)
+
+    def count_pieces(color):
+      cnt = 0
+      for r in range(SIZE):
+        for c in range(SIZE):
+          p = self.board[r][c]
+          if p != "." and p.startswith(color):
+            cnt += 1
+      return cnt
+
+    my_p = count_pieces(player_name)
+    opp_p = count_pieces(opp)
+    return (my_p - opp_p) * 10
+
+class MinimaxSolver():
+
+  def __init__(self, player_name):
+    self.player_name = player_name
+    self.time_start = None
+    self.max_time = None
+
+  def __maximize(self, state, alpha, beta, depth):
+
+    if time.time() - self.time_start >= self.max_time:
+      raise StopIteration("Out of time!")
+
+    if state.is_terminal():
+      return None, state.get_winners_points()[self.player_name]
+
+    if depth <= 0:
+      return None, state.heuristic(self.player_name)
+
+    max_child, max_utility = None, -np.inf
+
+    for option, child in state.children():
+
+      if child.curr_player.name == self.player_name:
+        _, utility = self.__maximize(child, alpha, beta, depth-1)
+      else:
+        _, utility = self.__minimize(child, alpha, beta, depth-1)
+
+      if utility > max_utility:
+        max_child, max_utility = option, utility
+
+      if max_utility >= beta:
+        break
+
+      alpha = max(alpha, max_utility)
+
+    return max_child, max_utility
+
+  def __minimize(self, state, alpha, beta, depth):
+
+    if time.time() - self.time_start >= self.max_time:
+      raise StopIteration("Out of time!")
+
+    if state.is_terminal():
+      return None, state.get_winners_points()[self.player_name]
+
+    if depth <= 0:
+      return None, state.heuristic(self.player_name)
+
+    min_child, min_utility = None, np.inf
+
+    for option, child in state.children():
+
+      if child.curr_player.name == self.player_name:
+        _, utility = self.__maximize(child, alpha, beta, depth-1)
+      else:
+        _, utility = self.__minimize(child, alpha, beta, depth-1)
+
+      if utility < min_utility:
+        min_child, min_utility = option, utility
+
+      if min_utility <= alpha:
+        break
+
+      beta = min(beta, min_utility)
+
+    return min_child, min_utility
+
+  def solve(self, state, max_time):
+    self.time_start = time.time()
+    self.max_time = max_time
+
+    best_option = None
+    for depth in range(1, 10000):
+      try:
+        best_option, _ = self.__maximize(state, -np.inf, np.inf, depth)
+      except StopIteration:
+        break
+
+    return best_option
+
+def choose_int(prompt, valid):
+  while True:
+    s = input(prompt).strip()
+    if s.isdigit():
+      x = int(s)
+      if x in valid:
+        return x
+    print(f"Entrada inválida. Opciones: {valid}")
+
+def main():
+  print("ONITAMA (estilo profe) - Humano vs IA (Minimax)")
+  session = OnitamaGameSession(player_types=["human", "AI"], minimax_time=30)
+
+  while True:
+    if session.is_terminal():
+      session.print_state()
+      pts = session.get_winners_points()
+      print("\nFIN. Puntos:", pts)
+      break
+
+    session.print_state()
+    player = session.curr_player.name
+
+    options = session.get_available_decisions()
+    if len(options) == 0:
+      w = opponent(player)
+      session.winners = [Player(w), Player(opponent(w))]
+      continue
+
+    if session.curr_player.type_ == "AI":
+      solver = MinimaxSolver(session.curr_player.name)
+      st = copy.deepcopy(session)
+      st.hide_print = True
+      decision = solver.solve(st, session.minimax_time)
+      ok = session.play_turn(decision)
+
+      if not session.hide_print:
+        print(f"\n[IA] {session.option_to_text(decision)}")
+        print(session.last_move_msg)
+      continue
+
+    count1 = sum(1 for m in options if m[2] == 0)
+    count2 = sum(1 for m in options if m[2] == 1)
+    print(f"\nJugadas disponibles: Carta 1 = {count1} | Carta 2 = {count2}")
+
+    ci = choose_int("\nElige carta (1/2): ", [1, 2]) - 1
+    options_card = [m for m in options if m[2] == ci]
+    if not options_card:
+      print("Esa carta no tiene movimientos. Vuelve a elegir.")
+      continue
+
+    print(f"\nMovimientos con {session.hands[player][ci].name}:")
+    for i, opt in enumerate(options_card, start=1):
+      print(f"{i}) {session.option_to_text(opt)}")
+
+    mi = choose_int("> ", list(range(1, len(options_card)+1))) - 1
+    decision = options_card[mi]
+    ok = session.play_turn(decision)
+    if not ok:
+      print("Movimiento inválido.")
+    else:
+      print("\n" + session.last_move_msg)
+
 if __name__ == "__main__":
-    game = Onitama()
-    game.play_two_players()
+  main()
