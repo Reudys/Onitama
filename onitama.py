@@ -5,13 +5,10 @@ import numpy as np
 
 SIZE = 5
 
-# ========================
-# Cartas (igual que tuyo)
-# ========================
 class Card():
   def __init__(self, name, moves):
     self.name = name
-    self.moves = moves  # tuple of (dr, dc)
+    self.moves = moves  
 
   def __str__(self):
     return self.name
