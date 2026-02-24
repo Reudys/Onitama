@@ -231,7 +231,7 @@ class OnitamaGameSession():
     self.set_piece(r, c, ".")
     used_card = self.rotate_cards(player, ci)
 
-    received_card = self.hands[player][ci]  # carta que entró a la mano (en el índice usado)
+    received_card = self.hands[player][ci]  
     capture_msg = f" (capturaste {dest})" if dest != "." else ""
     self.last_move_msg = (
       f"Moviste {piece} de {rc_to_coord(r,c)} -> {rc_to_coord(nr,nc)}{capture_msg}. "
@@ -374,7 +374,7 @@ def choose_int(prompt, valid):
     print(f"Entrada inválida. Opciones: {valid}")
 
 def main():
-  print("ONITAMA (estilo profe) - Humano vs IA (Minimax)")
+  print("ONITAMA - Humano vs IA (Minimax)")
   session = OnitamaGameSession(player_types=["human", "AI"], minimax_time=30)
 
   while True:
